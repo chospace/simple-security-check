@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Security Check — Choirul Anas</title>
+<meta name="description" content="Cek security headers website-mu gratis. Skor A+ sampai F + saran perbaikan.">
+<style>
+:root {
+  --bg: #ffffff;
+  --text: #1a1a1a;
+  --muted: #666;
+  --border: #e5e5e5;
+  --accent: #fe5186;
+  --pass: #16a34a;
+  --warn: #d97706;
+  --fail: #dc2626;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1d1e20;
+    --text: #e5e5e5;
+    --muted: #a1a1aa;
+    --border: #333;
+  }
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  padding: 2rem 1rem;
+  max-width: 720px;
+  margin: 0 auto;
+}
+header { text-align: center; margin-bottom: 2rem; }
+header h1 { font-size: 1.8rem; margin-bottom: 0.3rem; }
+header h1 .cursor { color: var(--accent); animation: blink 1s infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+header p { color: var(--muted); font-size: 0.95rem; }
+form { display: flex; gap: 0.5rem; margin-bottom: 2rem; }
+input[type="url"], input[type="text"] {
+  flex: 1;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 1rem;
+  background: var(--bg);
+  color: var(--text);
+}
+button {
+  padding: 0.75rem 1.5rem;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+button:disabled { opacity: 0.5; cursor: wait; }
+#loading { text-align: center; color: var(--muted); display: none; margin: 2rem 0; }
+#result { display: none; }
+.score-box {
+  text-align: center;
+  padding: 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin-bottom: 1.5rem;
+}
+.score-grade {
+  font-size: 4rem;
+  font-weight: 800;
+  line-height: 1;
+}
+.score-url { color: var(--muted); font-size: 0.85rem; word-break: break-all; margin-top: 0.5rem; }
+.check {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 0.75rem;
+}
+.check-head { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.3rem; }
+.badge {
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.15rem 0.6rem;
+  border-radius: 99px;
+  text-transform: uppercase;
+}
+.badge.pass { background: #dcfce7; color: var(--pass); }
+.badge.warn { background: #fef3c7; color: var(--warn); }
+.badge.fail { background: #fee2e2; color: var(--fail); }
+.check-name { font-weight: 600; }
+.check-desc { color: var(--muted); font-size: 0.9rem; }
+.check-value {
+  font-family: monospace;
+  font-size: 0.8rem;
+  background: var(--border);
+  padding: 0.3rem 0.6rem;
+  border-radius: 4px;
+  margin-top: 0.5rem;
+  word-break: break-all;
+  opacity: 0.8;
+}
+footer { text-align: center; margin-top: 3rem; color: var(--muted); font-size: 0.85rem; }
+footer a { color: var(--accent); text-decoration: none; }
+#error { color: var(--fail); text-align: center; margin: 1rem 0; display: none; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>security-check<span class="cursor">_</span></h1>
+  <p>Cek security headers website-mu. Gratis, tanpa daftar.</p>
+</header>
+
+<form id="scanForm">
+  <input type="text" id="urlInput" placeholder="contoh.com" autocomplete="off" spellcheck="false">
+  <button type="submit" id="scanBtn">Scan</button>
+</form>
+
+<div id="loading">🔍 Lagi scan, tunggu sebentar...</div>
+<div id="error"></div>
+<div id="result"></div>
+
+<footer>
+  dibuat oleh <a href="https://chospace.github.io">chospace</a> · data via hackertarget.com
+</footer>
+
+<script>
+const CHECKS = [
+  {
+    id: 'https',
+    name: 'HTTPS',
+    desc: 'Koneksi terenkripsi. Tanpa ini, data bisa disadap.',
+    test: (url, headers) => url.startsWith('https://')
+      ? { s: 'pass', v: 'HTTPS aktif' }
+      : { s: 'fail', v: 'Masih pakai HTTP!' }
+  },
+  {
+    id: 'hsts',
+    name: 'Strict-Transport-Security (HSTS)',
+    desc: 'Maksa browser selalu pakai HTTPS, cegah downgrade attack.',
+    test: (url, h) => {
+      const v = h['strict-transport-security'];
+      if (!v) return { s: 'fail', v: 'Header tidak ada' };
+      const maxAge = (v.match(/max-age=(\d+)/) || [])[1];
+      if (maxAge && +maxAge >= 31536000) return { s: 'pass', v };
+      return { s: 'warn', v: v + ' (max-age kurang dari 1 tahun)' };
+    }
+  },
+  {
+    id: 'frame',
+    name: 'X-Frame-Options / frame-ancestors',
+    desc: 'Cegah clickjacking — situsmu di-embed di iframe jahat.',
+    test: (url, h) => {
+      const xfo = h['x-frame-options'];
+      const csp = h['content-security-policy'] || '';
+      if (xfo) return { s: 'pass', v: 'X-Frame-Options: ' + xfo };
+      if (/frame-ancestors/.test(csp)) return { s: 'pass', v: 'frame-ancestors di CSP' };
+      return { s: 'fail', v: 'Tidak ada proteksi frame' };
+    }
+  },
+  {
+    id: 'content-type',
+    name: 'X-Content-Type-Options',
+    desc: 'Cegah browser nebak tipe konten (MIME sniffing).',
+    test: (url, h) => {
+      const v = h['x-content-type-options'];
+      if (v && v.toLowerCase() === 'nosniff') return { s: 'pass', v };
+      if (v) return { s: 'warn', v };
+      return { s: 'fail', v: 'Header tidak ada — tambah: nosniff' };
+    }
+  },
+  {
+    id: 'csp',
+    name: 'Content-Security-Policy',
+    desc: 'Batasi sumber script/resource. Pertahanan utama lawan XSS.',
+    test: (url, h) => {
+      const v = h['content-security-policy'];
+      if (!v) return { s: 'fail', v: 'Header tidak ada' };
+      if (/unsafe-inline/.test(v) && !/nonce|sha/.test(v)) return { s: 'warn', v: v.slice(0, 120) + '... (ada unsafe-inline)' };
+      return { s: 'pass', v: v.slice(0, 120) + (v.length > 120 ? '...' : '') };
+    }
+  },
+  {
+    id: 'referrer',
+    name: 'Referrer-Policy',
+    desc: 'Atur info apa yang bocor ke situs lain saat user klik link keluar.',
+    test: (url, h) => {
+      const v = h['referrer-policy'];
+      if (!v) return { s: 'warn', v: 'Header tidak ada (default browser: strict-origin-when-cross-origin)' };
+      return { s: 'pass', v };
+    }
+  },
+  {
+    id: 'permissions',
+    name: 'Permissions-Policy',
+    desc: 'Batasi akses browser API (kamera, mic, geolocation).',
+    test: (url, h) => {
+      const v = h['permissions-policy'] || h['feature-policy'];
+      if (!v) return { s: 'warn', v: 'Header tidak ada' };
+      return { s: 'pass', v: v.slice(0, 100) + (v.length > 100 ? '...' : '') };
+    }
+  },
+  {
+    id: 'server',
+    name: 'Server Disclosure',
+    desc: 'Header Server/X-Powered-By yang bocorin versi = info gratis buat attacker.',
+    test: (url, h) => {
+      const leaks = [];
+      if (h['server']) leaks.push('Server: ' + h['server']);
+      if (h['x-powered-by']) leaks.push('X-Powered-By: ' + h['x-powered-by']);
+      if (h['x-aspnet-version']) leaks.push('X-AspNet-Version: ' + h['x-aspnet-version']);
+      if (!leaks.length) return { s: 'pass', v: 'Tidak ada info server yang bocor' };
+      const hasVersion = /\d+\.\d+/.test(leaks.join(' '));
+      return { s: hasVersion ? 'warn' : 'pass', v: leaks.join(' · ') };
+    }
+  }
+];
+
+function grade(score) {
+  if (score >= 90) return 'A+';
+  if (score >= 80) return 'A';
+  if (score >= 70) return 'B';
+  if (score >= 60) return 'C';
+  if (score >= 50) return 'D';
+  if (score >= 40) return 'E';
+  return 'F';
+}
+function gradeColor(g) {
+  if (g[0] === 'A') return 'var(--pass)';
+  if (g[0] === 'B' || g[0] === 'C') return 'var(--warn)';
+  return 'var(--fail)';
+}
+
+document.getElementById('scanForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  let input = document.getElementById('urlInput').value.trim();
+  if (!input) return;
+  input = input.replace(/^https?:\/\//, '').split('/')[0];
+  const url = 'https://' + input;
+
+  const btn = document.getElementById('scanBtn');
+  const loading = document.getElementById('loading');
+  const error = document.getElementById('error');
+  const result = document.getElementById('result');
+
+  btn.disabled = true;
+  loading.style.display = 'block';
+  error.style.display = 'none';
+  result.style.display = 'none';
+  result.innerHTML = '';
+
+  try {
+    const res = await fetch('https://api.hackertarget.com/httpheaders/?q=' + encodeURIComponent(input));
+    if (!res.ok) throw new Error('API error');
+    const text = await res.text();
+    if (/error|invalid/i.test(text.slice(0, 100))) throw new Error('Domain tidak valid atau tidak bisa dijangkau');
+
+    const headers = {};
+    text.split('\n').forEach(line => {
+      const i = line.indexOf(':');
+      if (i > 0) headers[line.slice(0, i).trim().toLowerCase()] = line.slice(i + 1).trim();
+    });
+
+    let score = 100;
+    const rows = CHECKS.map(c => {
+      const r = c.test(url, headers);
+      if (r.s === 'fail') score -= 15;
+      else if (r.s === 'warn') score -= 7;
+      return { ...c, ...r };
+    });
+    score = Math.max(0, score);
+    const g = grade(score);
+
+    let html = `<div class="score-box">
+      <div class="score-grade" style="color:${gradeColor(g)}">${g}</div>
+      <div style="color:var(--muted);font-size:0.9rem;margin-top:0.3rem">skor: ${score}/100</div>
+      <div class="score-url">${url}</div>
+    </div>`;
+
+    rows.forEach(r => {
+      const badge = r.s === 'pass' ? 'Lolos' : r.s === 'warn' ? 'Waspada' : 'Gagal';
+      html += `<div class="check">
+        <div class="check-head">
+          <span class="badge ${r.s}">${badge}</span>
+          <span class="check-name">${r.name}</span>
+        </div>
+        <div class="check-desc">${r.desc}</div>
+        <div class="check-value">${escapeHtml(r.v)}</div>
+      </div>`;
+    });
+
+    result.innerHTML = html;
+    result.style.display = 'block';
+  } catch (err) {
+    error.textContent = '❌ ' + (err.message || 'Gagal scan. Coba lagi.');
+    error.style.display = 'block';
+  }
+
+  btn.disabled = false;
+  loading.style.display = 'none';
+});
+
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Auto-scan dari ?url= parameter
+const params = new URLSearchParams(location.search);
+if (params.get('url')) {
+  document.getElementById('urlInput').value = params.get('url');
+  document.getElementById('scanForm').dispatchEvent(new Event('submit'));
+}
+</script>
+</body>
+</html>
